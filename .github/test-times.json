@@ -1,0 +1,107 @@
+{
+  "schema_version": 2,
+  "cells": {
+    "macos-latest / Python 3.14": {
+      "tests/test_ci_secrets.py": [
+        3.22
+      ],
+      "tests/test_conftest.py": [
+        7.24
+      ],
+      "tests/test_ratchet_push.py": [
+        46.62
+      ],
+      "tests/test_release_dispatch.py": [
+        0.9
+      ],
+      "tests/test_type_ratchet.py": [
+        0.31
+      ]
+    },
+    "macos-latest / Python 3.15": {
+      "tests/test_ci_secrets.py": [
+        4.33
+      ],
+      "tests/test_conftest.py": [
+        12.51
+      ],
+      "tests/test_ratchet_push.py": [
+        70.08
+      ],
+      "tests/test_release_dispatch.py": [
+        1.97
+      ],
+      "tests/test_type_ratchet.py": [
+        0.44
+      ]
+    },
+    "ubuntu-latest / Python 3.14": {
+      "tests/test_ci_secrets.py": [
+        1.38
+      ],
+      "tests/test_conftest.py": [
+        6.08
+      ],
+      "tests/test_ratchet_push.py": [
+        48.21
+      ],
+      "tests/test_release_dispatch.py": [
+        0.58
+      ],
+      "tests/test_type_ratchet.py": [
+        0.41
+      ]
+    },
+    "ubuntu-latest / Python 3.15": {
+      "tests/test_ci_secrets.py": [
+        1.54
+      ],
+      "tests/test_conftest.py": [
+        7.15
+      ],
+      "tests/test_ratchet_push.py": [
+        53.13
+      ],
+      "tests/test_release_dispatch.py": [
+        0.61
+      ],
+      "tests/test_type_ratchet.py": [
+        0.44
+      ]
+    },
+    "windows-latest / Python 3.14": {
+      "tests/test_ci_secrets.py": [
+        6.81
+      ],
+      "tests/test_conftest.py": [
+        13.12
+      ],
+      "tests/test_ratchet_push.py": [
+        112.0
+      ],
+      "tests/test_release_dispatch.py": [
+        1.82
+      ],
+      "tests/test_type_ratchet.py": [
+        0.77
+      ]
+    },
+    "windows-latest / Python 3.15": {
+      "tests/test_ci_secrets.py": [
+        6.68
+      ],
+      "tests/test_conftest.py": [
+        13.0
+      ],
+      "tests/test_ratchet_push.py": [
+        88.46
+      ],
+      "tests/test_release_dispatch.py": [
+        1.74
+      ],
+      "tests/test_type_ratchet.py": [
+        0.51
+      ]
+    }
+  }
+}

@@ -1,0 +1,34 @@
+# Defect-oriented pylint policy: this gate exists to find correctness
+# defects, not style opinions. Style, convention and refactor checks are
+# OFF and error/warning checks are ON, so a red lint build is always a
+# finding about the code's behaviour and never about its formatting.
+# Formatting itself stays with pycodestyle, whose exit code — not any
+# score line — is that gate's verdict.
+#
+# The list below turns off the style categories (C = convention,
+# R = refactor, I = information) wholesale, then names exactly two
+# error/warning messages to admit anyway, because a real finding forced
+# each one: the first tree-wide run (pylint 4.1.1, 2026-10-02) reported
+# nothing else. The E/W categories are never named in an `enable=`
+# afterwards — a later category-level enable re-enables every specific
+# message listed before it — so what stays off stays off. Inheriting a
+# longer list from another project would read as an audit trail while
+# suppressing nothing here; no entry below is dead.
+
+[MASTER]
+# The suites import `scripts.ci` from the repository root, as pytest runs them.
+init-hook=import sys; sys.path.insert(0, '.')
+
+[MESSAGES CONTROL]
+# subprocess-run-check — the suites inspect returncode themselves and
+#   print their own failure diagnostics; check=True would raise before
+#   the assertion that explains what actually went wrong.
+#
+# protected-access — the suites reach into module internals
+#   deliberately; that is what lets them exercise a helper without
+#   standing up GitHub's API.
+disable=C,
+    R,
+    I,
+    subprocess-run-check,
+    protected-access

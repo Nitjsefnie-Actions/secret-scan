@@ -1,0 +1,191 @@
+name: actionlint
+
+# The gate on the gates. Everything else in .github/workflows is unreviewed
+# code that runs with a repository token, and a mistake in it fails in ways
+# the other gates structurally cannot catch: a workflow with a typo in an
+# `if:` expression does not go red, it silently stops running.
+#
+# Two tools, because they answer different questions:
+#
+#   actionlint — is this workflow WELL-FORMED? Schema, expression syntax,
+#   context availability (`github.event.review` on a push event),
+#   `runs-on` labels, and shellcheck over every `run:` block, which is where
+#   most real bugs live.
+#
+#   zizmor — is this workflow SAFE? Script injection through `${{ }}` in a
+#   `run:` block, over-broad `permissions:`, credential persistence after
+#   checkout, unpinned action references.
+#
+# Both tools are pinned. actionlint is verified by checksum rather than
+# trusted from the release page, because a linter that runs before every
+# other gate is a supply-chain position worth defending. zizmor is
+# hash-pinned in requirements-zizmor.txt at the repo root, which Dependabot
+# watches for version bumps.
+#
+# Suppressions belong at the offending line as a `# zizmor: ignore[rule]`
+# comment WITH a justification, never as a raised
+# --min-severity here: a threshold silences the next finding too, and the
+# next one is the one nobody has thought about yet.
+
+on:
+  push:
+    # Default branch only: a pull-request head already gets one run from
+    # the `pull_request` event below, and an unfiltered `push` schedules
+    # the same commit a second time under a different ref, which the
+    # `concurrency` group cannot collapse.
+    # Deliberately unfiltered by path: a conflict marker committed into
+    # README.md must not reach main without this job's tree-wide
+    # merge-marker scan — the step below keeps that push checked.
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actionlint-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Fork release, not stock rhysd/actionlint: upstream v1.7.12 plus
+      # rhysd/actionlint#654, which adds GitHub's documented `queue` key
+      # under `concurrency` (single|max). Stock 1.7.12 false-reds the
+      # `queue: max` that claim.yml needs; return to rhysd's own release once
+      # it ships the key.
+      ACTIONLINT_VERSION: 1.7.12-queue.3
+      ACTIONLINT_REPO: Nitjsefnie-OSC/actionlint
+      # sha256 of actionlint_1.7.12-queue.3_linux_amd64.tar.gz, from the
+      # release's own checksums file. Bump both together.
+      ACTIONLINT_SHA256: 56693f8e7182360d8ecb67cbfc39cc674cde5d1b510507fff562b158bb4fc7bc
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
+
+      - name: Check no tracked file carries a merge-conflict marker
+        # A conflict marker is text that looks like prose in a Markdown file, so
+        # only a mechanical check can see it. git grep reads the tracked files out
+        # of the working tree, which on a clean checkout is the repository as
+        # shipped, and -I keeps a binary from being reported as a match. The three
+        # markers are matched in the shapes git writes them: `<<<<<<< ` and `>>>>>>> `
+        # carry the label after seven characters, and the separator is exactly
+        # seven `=`; diff3's extra `||||||| base` line changes nothing, because
+        # the other three are still written. This job rather than the test one
+        # because this workflow's push trigger is deliberately unfiltered (see the
+        # push trigger's own comment), so it runs for a documentation-only commit
+        # that carries a marker as well as for a code change.
+        run: |
+          # git grep exits 1 for "no match" and above 1 for an error it could
+          # not run, and a guard that reads its own error as a clean tree is
+          # the false green this step exists to prevent.
+          found=0
+          git grep -nI -E '^(<{7}( |$)|>{7}( |$)|={7}$)' -- . || found=$?
+          if [ "$found" -gt 1 ]; then
+            echo "git grep exited $found, so no marker was looked for."
+            exit "$found"
+          fi
+          if [ "$found" -eq 0 ]; then
+            echo "A merge-conflict marker is committed. Resolve the conflict, rebase onto the target branch and push again."
+            exit 1
+          fi
+
+      - name: Install actionlint
+        # Downloaded and checksum-verified rather than piped from the
+        # install script: `curl | bash` would make this job trust whatever
+        # that URL serves at run time.
+        # The retries are curl's own flags, not claim's download.sh wrapper:
+        # the same policy in one line, with no second copy to keep in step.
+        run: |
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 60 \
+            --retry 8 --retry-all-errors --retry-max-time 300 \
+            --output "$tarball" \
+            "https://github.com/${ACTIONLINT_REPO}/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" actionlint
+          ./actionlint --version
+
+      - name: Install zizmor
+        id: install_zizmor
+        # pip's own --retries (5xx transport failures) and a wheel-only
+        # install: no wrapper script to keep in step, and no source build of
+        # a hash-pinned tool from whatever sdist the index serves.
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --retries 8 --timeout 60 -r requirements-zizmor.txt
+
+      - name: Install PyYAML
+        # The actionlint step's wrapper generator imports yaml; PyYAML is a
+        # development tool here (the suites install it from
+        # requirements-test.txt), installed for this job from its own
+        # hash-pinned manifest, the same shape as requirements-zizmor.txt.
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --retries 8 --timeout 60 -r requirements-actionlint.txt
+
+      - name: actionlint
+        id: actionlint
+        # actionlint accepts workflows, not a composite action as a top-level
+        # file. The generated workflow gives it one: the action's inputs
+        # become workflow_dispatch inputs and its steps are copied verbatim,
+        # so actionlint checks the steps' expressions and shell blocks
+        # against the inputs they actually run with. This generated workflow
+        # is lint input only and is never executed.
+        run: |
+          python - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import yaml
+
+          action = yaml.safe_load(Path("action.yml").read_text())
+          assert action["runs"]["using"] == "composite"
+          inputs = {
+              name: {"description": spec["description"], "type": "string"}
+              for name, spec in action.get("inputs", {}).items()
+          }
+          workflow = {
+              "on": {"workflow_dispatch": {"inputs": inputs}},
+              "permissions": {},
+              "jobs": {"action": {
+                  "runs-on": "ubuntu-latest",
+                  "steps": [{"uses": "./"}] + action["runs"]["steps"],
+              }},
+          }
+          target = Path(os.environ["RUNNER_TEMP"]) / "secret-scan-action-workflow.yml"
+          target.write_text(yaml.safe_dump(workflow, sort_keys=False))
+          PYTHON
+          ./actionlint -color .github/workflows/*.yml "$RUNNER_TEMP/secret-scan-action-workflow.yml"
+
+      - name: zizmor
+        # Runs even when actionlint is red, so one push reports both gates —
+        # the pattern lint.yml reuses for pycodestyle/pylint. Not when
+        # the install itself failed, which would report a tool bug as a
+        # clean audit.
+        if: ${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}
+        env:
+          # Enables the online audits (resolving action refs, checking for
+          # known-vulnerable action versions). Read-only, and this workflow
+          # declares contents: read.
+          GH_TOKEN: ${{ github.token }}
+        # Exit 1 is zizmor's audit error, such as an online audit's failed
+        # GitHub API call, and is retried; a finding exits 11-14 at once.
+        run: |
+          for attempt in 1 2 3; do
+            status=0
+            zizmor --no-progress action.yml .github/workflows/ || status=$?
+            if [ "$status" -ne 1 ] || [ "$attempt" -eq 3 ]; then exit "$status"; fi
+            echo "attempt $attempt: zizmor exited 1, an audit error; retrying"
+            sleep $(( attempt * 15 ))
+          done

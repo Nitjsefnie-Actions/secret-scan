@@ -23,8 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_STEP = "Take the scan's config and ignore list from the trusted commit"
 HISTORY_STEP, TREE_STEP = 'Scan the git history', 'Scan the working tree'
 CANARY_STEP = 'Prove the scanner flags a planted canary'
-ACTION = yaml.load((ROOT / 'action.yml').read_text(encoding='utf-8'),
-                   Loader=yaml.BaseLoader)
+ACTION = yaml.load((ROOT / 'action.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
 # Shaped like gitleaks' default config: a global path list, a path-only rule allowlist,
 # and a BitBake-style one that needs a path AND a line, which stays.
 DEFAULT = r"""title = "default"
@@ -76,10 +75,12 @@ def _python3_env(tmp):
     return str(bash_env)
 
 
-def _step_script(tmp, name):
+def _run_step(tmp, name, cwd, runner, **env):
     script = Path(tmp) / f'{name}.sh'
     script.write_text(_named_run(ACTION['runs']['steps'], name), encoding='utf-8', newline='\n')
-    return script
+    env = {**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp), **env}
+    return subprocess.run([_action_bash(), '-e', str(script)], cwd=cwd, env=env,
+                          capture_output=True, text=True, timeout=120)
 
 
 def test_secrets_scans_full_history_from_a_trusted_config(tmp):
@@ -176,13 +177,9 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step):
         'if [ -z "$leak" ]; then echo [] > "$report"; exit 0; fi\n'
         'echo "[{\\"File\\": \\"$leak\\"}]" > "$report"; exit 3\n', encoding='utf-8', newline='\n')
     stub.chmod(0o755)
-    result = subprocess.run(
-        [_action_bash(), '-e', str(_step_script(tmp, step))],
-        cwd=repo, capture_output=True, text=True, timeout=120,
-        env={**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp),
-             'SECRET_SCAN_STUB_ARGV': str(record / 'argv'),
-             'SECRET_SCAN_STUB_ATTRIBUTES': str(record / 'attributes'),
-             'SECRET_SCAN_STUB_IGNORE': str(record / 'ignore')})
+    result = _run_step(tmp, step, repo, runner, SECRET_SCAN_STUB_ARGV=str(record / 'argv'),
+                       SECRET_SCAN_STUB_ATTRIBUTES=str(record / 'attributes'),
+                       SECRET_SCAN_STUB_IGNORE=str(record / 'ignore'))
     assert result.returncode == (3 if step == HISTORY_STEP else 1), (
         'a leak anywhere fails the step', result.stderr)
     assert step == TREE_STEP or (record / 'attributes').read_text(encoding='utf-8') == '* diff\n', (
@@ -225,10 +222,7 @@ def test_a_tree_with_nothing_to_scan_reports_no_findings(tmp):
     (runner / 'gitleaks').write_text('#!/usr/bin/env bash\necho "$@" >> "$RUNNER_TEMP/calls"\n',
                                      encoding='utf-8', newline='\n')
     (runner / 'gitleaks').chmod(0o755)
-    result = subprocess.run(
-        [_action_bash(), '-e', str(_step_script(tmp, TREE_STEP))], cwd=repo, capture_output=True,
-        text=True, timeout=120,
-        env={**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp)})
+    result = _run_step(tmp, TREE_STEP, repo, runner)
     assert result.returncode == 0 and not (runner / 'calls').exists(), result.stderr
     assert json.loads((runner / 'secret-scan-report/tree.json').read_text(encoding='utf-8')) == []
 
@@ -244,11 +238,8 @@ def test_the_canary_step_passes_only_on_a_reported_finding(tmp, output, status, 
                     'cat "${@: -1}/canary.env" > canary\nprintf "$SECRET_SCAN_STUB_OUT"\n'
                     'exit "$SECRET_SCAN_STUB_STATUS"\n', encoding='utf-8', newline='\n')
     stub.chmod(0o755)
-    result = subprocess.run(
-        [_action_bash(), '-e', str(_step_script(tmp, CANARY_STEP))], cwd=tmp,
-        capture_output=True, text=True, timeout=120, env={
-            **os.environ, 'RUNNER_TEMP': str(runner), 'SECRET_SCAN_STUB_OUT': output,
-            'SECRET_SCAN_STUB_STATUS': str(status)})
+    result = _run_step(tmp, CANARY_STEP, tmp, runner, SECRET_SCAN_STUB_OUT=output,
+                       SECRET_SCAN_STUB_STATUS=str(status))
     assert (result.returncode == 0) == passes, (result.stdout, result.stderr)
     assert output in result.stdout, 'the scan output is printed whatever the verdict'
     assert passes or f'(exit {status})' in result.stderr
@@ -287,20 +278,16 @@ def test_the_trusted_config_step_reads_the_trusted_event_commit(tmp):
     tip = commit(tip_config, 'tip')
     commit('[allowlist]\ndescription = "the head exempts itself"\n', 'head',
            ignore='the head exempts itself\n')
-    script = _step_script(tmp, CONFIG_STEP)
     runs = iter(range(100))
 
     def run(before='', base='', event='push', default_branch=''):
         runner = Path(tmp) / f'runner-temp-{next(runs)}'
         runner.mkdir()
         (runner / 'gitleaks-default.toml').write_text(DEFAULT, encoding='utf-8', newline='\n')
-        result = subprocess.run(
-            [_action_bash(), '-e', str(script)], cwd=repo, capture_output=True,
-            text=True, timeout=120, env={
-                **os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp),
-                'SECRET_SCAN_ACTION_PATH': str(ROOT), 'SECRET_SCAN_EVENT_NAME': event,
-                'SECRET_SCAN_BASE_SHA': base, 'SECRET_SCAN_BEFORE_SHA': before,
-                'SECRET_SCAN_DEFAULT_BRANCH': default_branch})
+        result = _run_step(
+            tmp, CONFIG_STEP, repo, runner, SECRET_SCAN_ACTION_PATH=str(ROOT),
+            SECRET_SCAN_EVENT_NAME=event, SECRET_SCAN_BASE_SHA=base,
+            SECRET_SCAN_BEFORE_SHA=before, SECRET_SCAN_DEFAULT_BRANCH=default_branch)
         copy_dir = runner / 'gitleaks-trusted'
         stripped = runner / 'gitleaks-default-stripped.toml'
         if result.returncode == 0:

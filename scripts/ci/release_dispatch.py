@@ -57,7 +57,10 @@ def validate_version(read, repository, version):
     versions = [version_tuple(tag[1:]) for tag in _tags(read, repository)
                 if re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag)]
     if not versions:
-        raise ReleaseError(f'refusing release {version}: no vX.Y.Z tag exists')
+        if proposed != (1, 0, 0):
+            raise ReleaseError(f'refusing release {version}: no vX.Y.Z tag exists, '
+                               'so the first release is 1.0.0')
+        return
     major, minor, patch = max(versions)
     successors = ((major, minor, patch + 1), (major, minor + 1, 0), (major + 1, 0, 0))
     if proposed not in successors:

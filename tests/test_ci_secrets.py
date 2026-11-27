@@ -63,9 +63,10 @@ SPEC.loader.exec_module(MODULE)
 
 
 def _git(repo, *arguments):
-    identity = ('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', '-c',
-                'commit.gpgsign=false')  # never the ambient one
-    return subprocess.run(['git', '-C', str(repo), *identity, *arguments], check=True,
+    # A fixed identity, never the ambient one, and no detached maintenance racing a snapshot.
+    config = ('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.com', '-c',
+              'commit.gpgsign=false', '-c', 'maintenance.auto=false', '-c', 'gc.auto=0')
+    return subprocess.run(['git', '-C', str(repo), *config, *arguments], check=True,
                           capture_output=True, text=True).stdout
 
 
@@ -153,7 +154,7 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step, leak, 
         f'{name}/kept' for name in judged]
     for name in (*entries[:3], 'sub/x', entries[4], '../outside/.gitleaksignore', *planted):
         (repo / name).parent.mkdir(exist_ok=True)
-        (repo / name).write_text('x\n', encoding='utf-8')
+        (repo / name).write_text('x\n', encoding='utf-8', newline='\n')
     targets = {'link': outside / '.gitleaksignore', 'dangling': outside / 'missing'}
     for link, target in [(repo / 'link', outside)] + [
             (repo / name, targets[state]) for name in judged if state in targets]:
@@ -164,7 +165,7 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step, leak, 
     if state == 'tracked':  # the top-level file committed as it is, sub's modified since
         _git(repo, 'add', '--', *judged[:2])
         _git(repo, 'commit', '-qm', 'tip')
-        (repo / judged[1]).write_text('modified\n', encoding='utf-8')
+        (repo / judged[1]).write_text('modified\n', encoding='utf-8', newline='\n')
 
     def tree():
         return {path: os.readlink(path) if path.is_symlink() else None if path.is_dir()
@@ -233,7 +234,7 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step, leak, 
 def test_a_tree_with_nothing_to_scan_reports_no_findings(tmp):
     repo, runner = Path(tmp) / 'repo', Path(tmp) / 'runner-temp'
     subprocess.run(['git', 'init', '-q', str(repo)], check=True, capture_output=True)
-    (repo / '.gitleaksignore').write_text('kept\n', encoding='utf-8')
+    (repo / '.gitleaksignore').write_text('kept\n', encoding='utf-8', newline='\n')
     (runner / 'secret-scan-report').mkdir(parents=True)
     result = _run_step(tmp, TREE_STEP, repo, runner,
                        '#!/usr/bin/env bash\necho "$@" >> "$RUNNER_TEMP/calls"\n')

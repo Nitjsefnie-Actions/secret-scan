@@ -65,7 +65,27 @@ runs:
       # Bare: this step's exit status IS the gate. --redact masks what --verbose names.
       shell: bash
       run: |
-        rm -rf .gitleaksignore
+        aside="$(mktemp -d "$RUNNER_TEMP/secret-scan-aside.XXXXXX")" cleared=() slots=()
+        # A rename moves a link, never its target; a recorded path then holds only this step's.
+        set_aside() {
+          slot="$aside/${#cleared[@]}"
+          if [ ! -L "$1" ] && [ ! -e "$1" ]; then slot=; else mv -- "$1" "$slot"; fi
+          cleared+=("$1") slots+=("$slot")
+        }
+        # A path that cannot go back fails the step, even after a clean scan.
+        put_back() {
+          status=$? failed=
+          for i in "${!cleared[@]}"; do
+            if ! { rm -rf -- "${cleared[i]}" && if [ -n "${slots[i]}" ]; then
+              mv -- "${slots[i]}" "${cleared[i]}"; fi; }; then failed=1; fi
+          done
+          if [ -z "$failed" ] && rmdir -- "$aside"; then exit "$status"; fi
+          echo "could not put the checkout back as it was; what is missing is in $aside" >&2
+          exit 1
+        }
+        trap put_back EXIT
+        set_aside .gitleaksignore
+        set_aside .git/info/attributes
         # diff forces a NUL-bearing blob's content into git log -p; unset or -diff hides it.
         echo '* diff' > .git/info/attributes
         "$RUNNER_TEMP/gitleaks" detect --verbose --redact --ignore-gitleaks-allow \
@@ -80,16 +100,35 @@ runs:
       if: ${{ !cancelled() && steps.trusted.outcome == 'success' }}
       shell: bash
       run: |
-        rm -rf .gitleaksignore
+        aside="$(mktemp -d "$RUNNER_TEMP/secret-scan-aside.XXXXXX")" cleared=() slots=()
+        # The history scan's set-aside and put-back.
+        set_aside() {
+          slot="$aside/${#cleared[@]}"
+          if [ ! -L "$1" ] && [ ! -e "$1" ]; then slot=; else mv -- "$1" "$slot"; fi
+          cleared+=("$1") slots+=("$slot")
+        }
+        # shellcheck disable=SC2329
+        put_back() {
+          status=$? failed=
+          for i in "${!cleared[@]}"; do
+            if ! { rm -rf -- "${cleared[i]}" && if [ -n "${slots[i]}" ]; then
+              mv -- "${slots[i]}" "${cleared[i]}"; fi; }; then failed=1; fi
+          done
+          if [ -z "$failed" ] && rmdir -- "$aside"; then exit "$status"; fi
+          echo "could not put the checkout back as it was; what is missing is in $aside" >&2
+          exit 1
+        }
+        trap put_back EXIT
+        set_aside .gitleaksignore
         shopt -s nullglob
         GLOBIGNORE=.git
         parts="$RUNNER_TEMP/gitleaks-tree-reports"
         mkdir "$parts"
         found=0 n=0
         for entry in *; do
-          # gitleaks reads <source>/.gitleaksignore too; a link could lead the rm outside.
+          # gitleaks reads <source>/.gitleaksignore too; a link could lead outside.
           [ -L "$entry" ] && continue
-          rm -rf -- "$entry/.gitleaksignore"
+          if [ -d "$entry" ]; then set_aside "$entry/.gitleaksignore"; fi
           n=$((n + 1))
           if ! "$RUNNER_TEMP/gitleaks" dir --verbose --redact --ignore-gitleaks-allow \
             --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \

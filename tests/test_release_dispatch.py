@@ -87,7 +87,10 @@ def test_version_refuses_missing_releases_and_rejects_shape_before_reads(tmp):
     del tmp
     module = _load()
     api = API({f'repos/{REPO}/tags': [[{'name': 'v1.0.0-preview'}], []]})
-    _refuses(module, lambda: module.validate_version(api, REPO, '1.0.0'), 'no vX.Y.Z')
+    for version in ('0.1.0', '1.0.1', '1.1.0', '2.0.0'):
+        _refuses(module, lambda version=version: module.validate_version(api, REPO, version),
+                 'the first release is 1.0.0')
+    module.validate_version(api, REPO, '1.0.0')
     api = API({})
     _refuses(module, lambda: module.validate_version(api, REPO, 'v1.0.0'), 'version')
     assert not api.calls

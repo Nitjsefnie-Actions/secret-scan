@@ -26,8 +26,9 @@ over the whole git history, so it needs a full-history checkout, and over the
 checked-out working tree, every top-level entry but `.git`. Both scans use the
 same config and ignore list, the tree scan reports even when the history scan
 has findings, and a finding in either fails the action; either way it puts back
-the checkout files it moves aside, so later steps see the tree it found. Each
-writes a gitleaks JSON report, `[]` when clean and the findings when red:
+the checkout files it moves aside, so later steps see the tree it found, and one
+it cannot put back fails the step and stays under `$RUNNER_TEMP`. Each writes a
+gitleaks JSON report, `[]` when clean and the findings when red:
 `$RUNNER_TEMP/secret-scan-report/history.json` and `tree.json`, for an
 `actions/upload-artifact` step with `if: ${{ !cancelled() }}`, so it runs
 after a red scan, and `path: ${{ runner.temp }}/secret-scan-report`. Secrets

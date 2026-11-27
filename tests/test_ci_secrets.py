@@ -141,15 +141,18 @@ def test_the_scan_steps_clear_the_judged_exemptions(tmp, step):
     copy_dir.mkdir(parents=True)
     record = Path(tmp) / 'record'
     record.mkdir()
+    for name in ('-dash.txt', '.hidden', 'a.txt', 'z.txt'):
+        (repo / name).write_text('x\n', encoding='utf-8')
     # The stub takes the binary's place where the download step left it and
-    # records what the step did around it.
+    # records each call; it finds a leak in the history and in a.txt alone.
     stub = runner / 'gitleaks'
     stub.write_text(
         '#!/usr/bin/env bash\n'
-        'printf "%s\\n" "$@" > "$SECRET_SCAN_STUB_ARGV"\n'
+        'printf "%s\\t" "$@" >> "$SECRET_SCAN_STUB_ARGV"; echo >> "$SECRET_SCAN_STUB_ARGV"\n'
         'cat .git/info/attributes > "$SECRET_SCAN_STUB_ATTRIBUTES"\n'
-        'if [ -e .gitleaksignore ]; then echo present > "$SECRET_SCAN_STUB_IGNORE"; '
-        'else echo absent > "$SECRET_SCAN_STUB_IGNORE"; fi\nexit 3\n',
+        'if [ -e .gitleaksignore ]; then echo present >> "$SECRET_SCAN_STUB_IGNORE"; '
+        'else echo absent >> "$SECRET_SCAN_STUB_IGNORE"; fi\n'
+        'case "${@: -1}" in a.txt | --log-opts=*) exit 3 ;; esac\n',
         encoding='utf-8', newline='\n')
     stub.chmod(0o755)
     result = subprocess.run(
@@ -159,20 +162,26 @@ def test_the_scan_steps_clear_the_judged_exemptions(tmp, step):
              'SECRET_SCAN_STUB_ARGV': str(record / 'argv'),
              'SECRET_SCAN_STUB_ATTRIBUTES': str(record / 'attributes'),
              'SECRET_SCAN_STUB_IGNORE': str(record / 'ignore')})
-    assert result.returncode == 3, ('the scan status is the step status', result.stderr)
+    assert result.returncode == (3 if step == HISTORY_STEP else 1), (
+        'a leak anywhere fails the step', result.stderr)
     assert step == TREE_STEP or (record / 'attributes').read_text(encoding='utf-8') == '* diff\n', (
         'a plain diff attribute keeps a NUL-bearing blob in the scan; -diff '
         'and an unspecified attribute both hide it from git log -p')
-    assert (record / 'ignore').read_text(encoding='utf-8').strip() == 'absent', (
+    calls = [line.split('\t')[:-1]
+             for line in (record / 'argv').read_text(encoding='utf-8').splitlines()]
+    assert (record / 'ignore').read_text(encoding='utf-8').split() == ['absent'] * len(calls), (
         'the judged tree no longer exempts itself through .gitleaksignore')
-    argv = (record / 'argv').read_text(encoding='utf-8').splitlines()
     command = 'detect' if step == HISTORY_STEP else 'dir'
-    assert argv[:4] == [command, '--verbose', '--redact', '--ignore-gitleaks-allow'], argv
-    assert argv[4] == '--config' and Path(argv[5]) == copy_dir / '.gitleaks.toml', argv
-    assert argv[6] == '--gitleaks-ignore-path' and Path(argv[7]) == copy_dir, argv
+    for argv in calls:
+        assert argv[:4] == [command, '--verbose', '--redact', '--ignore-gitleaks-allow'], argv
+        assert argv[4] == '--config' and Path(argv[5]) == copy_dir / '.gitleaks.toml', argv
+        assert argv[6] == '--gitleaks-ignore-path' and Path(argv[7]) == copy_dir, argv
     log_opts = '--full-history --all --diff-filter=uxdb --diff-merges=first-parent'
-    assert argv[8:] == ([f'--log-opts={log_opts}'] if step == HISTORY_STEP else ['.']), (
-        'the history walk keeps type changes and merges; the tree scan reads the checkout')
+    # The tree scan reads every checked-out entry, after a leak too, but never
+    # git's own metadata; `--` keeps a leading dash a path.
+    assert ([argv[8:] for argv in calls] == [[f'--log-opts={log_opts}']] if step == HISTORY_STEP
+            else sorted(argv[8:] for argv in calls) == [
+                ['--', name] for name in sorted(('-dash.txt', '.hidden', 'a.txt', 'z.txt'))]), calls
 
 
 @pytest.mark.parametrize('output, status, passes', [

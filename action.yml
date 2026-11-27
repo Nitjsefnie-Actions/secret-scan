@@ -75,13 +75,21 @@ runs:
 
     - name: Scan the working tree
       # Reported even when the history scan is red, never without the trusted config.
+      # Every top-level entry but .git, where a pre-v6 checkout persists its token;
+      # each entry's findings keep the fingerprints one scan of . would give.
       if: ${{ !cancelled() && steps.trusted.outcome == 'success' }}
       shell: bash
       run: |
         rm -rf .gitleaksignore
-        "$RUNNER_TEMP/gitleaks" dir --verbose --redact --ignore-gitleaks-allow \
-          --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
-          --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" .
+        shopt -s nullglob
+        GLOBIGNORE=.git
+        found=0
+        for entry in *; do
+          if ! "$RUNNER_TEMP/gitleaks" dir --verbose --redact --ignore-gitleaks-allow \
+            --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
+            --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" -- "$entry"; then found=1; fi
+        done
+        exit "$found"
 
     - name: Prove the scanner flags a planted canary
       # A clean scan proves nothing when the rules match nothing. The token is

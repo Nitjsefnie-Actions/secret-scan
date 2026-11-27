@@ -1,0 +1,50 @@
+{
+  ".github/dependabot.yml": [
+    832,
+    1325
+  ],
+  ".github/workflows/actionlint.yml": [
+    3982,
+    6614
+  ],
+  ".github/workflows/audit.yml": [
+    2996,
+    4881
+  ],
+  ".github/workflows/codeql.yml": [
+    1870,
+    2783
+  ],
+  ".github/workflows/lint.yml": [
+    1464,
+    2254
+  ],
+  ".github/workflows/pr-gate.yml": [
+    427,
+    1095
+  ],
+  ".github/workflows/scorecard.yml": [
+    202,
+    1196
+  ],
+  ".github/workflows/secrets.yml": [
+    1577,
+    1928
+  ],
+  ".github/workflows/tests.yml": [
+    475,
+    2522
+  ],
+  ".github/workflows/types.yml": [
+    1307,
+    2871
+  ],
+  "scripts/ci/type_ratchet.py": [
+    1279,
+    4191
+  ],
+  "tests/_workflows.py": [
+    420,
+    2183
+  ]
+}

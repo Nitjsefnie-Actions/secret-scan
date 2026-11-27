@@ -46,7 +46,7 @@ runs:
           git cat-file blob "$trusted:$1"
         }
         dir="$RUNNER_TEMP/gitleaks-trusted"
-        mkdir "$dir"
+        mkdir "$dir" "$RUNNER_TEMP/secret-scan-report"
         if ! read_trusted .gitleaks.toml > "$dir/.gitleaks.toml"; then
           echo "no .gitleaks.toml at trusted commit '$trusted': default rules"
           printf '[extend]\nuseDefault = true\n' > "$dir/.gitleaks.toml"
@@ -71,7 +71,8 @@ runs:
         "$RUNNER_TEMP/gitleaks" detect --verbose --redact --ignore-gitleaks-allow \
           --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
           --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" \
-          --log-opts='--full-history --all --diff-filter=uxdb --diff-merges=first-parent'
+          --log-opts='--full-history --all --diff-filter=uxdb --diff-merges=first-parent' \
+          --report-format json --report-path "$RUNNER_TEMP/secret-scan-report/history.json"
 
     - name: Scan the working tree
       # Reported even when the history scan is red, never without the trusted config.
@@ -82,12 +83,23 @@ runs:
         rm -rf .gitleaksignore
         shopt -s nullglob
         GLOBIGNORE=.git
-        found=0
+        parts="$RUNNER_TEMP/gitleaks-tree-reports"
+        mkdir "$parts"
+        found=0 n=0
         for entry in *; do
+          # gitleaks reads <source>/.gitleaksignore too; a link could lead the rm outside.
+          [ -L "$entry" ] && continue
+          rm -rf -- "$entry/.gitleaksignore"
+          n=$((n + 1))
           if ! "$RUNNER_TEMP/gitleaks" dir --verbose --redact --ignore-gitleaks-allow \
             --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
-            --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" -- "$entry"; then found=1; fi
+            --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" \
+            --report-format json --report-path "$parts/$n.json" -- "$entry"; then found=1; fi
         done
+        python3 -I -c 'import json, sys
+        json.dump([f for p in sys.argv[2:] for f in json.load(open(p, encoding="utf-8"))],
+                  open(sys.argv[1], "w", encoding="utf-8"), indent=1)' \
+          "$RUNNER_TEMP/secret-scan-report/tree.json" "$parts"/*.json
         exit "$found"
 
     - name: Prove the scanner flags a planted canary

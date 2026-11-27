@@ -70,21 +70,16 @@ def _git(repo, *arguments):
                           capture_output=True, text=True).stdout
 
 
-def _python3_env(tmp):
-    """A BASH_ENV making a step's python3 this interpreter: the suite also runs on Windows."""
-    bash_env = Path(tmp) / 'python3.bash'
-    bash_env.write_text(f'python3() {{ {shlex.quote(sys.executable)} "$@"; }}\n',
-                        encoding='utf-8', newline='\n')
-    return str(bash_env)
-
-
-def _run_step(tmp, name, cwd, runner, gitleaks='', **env):
+def _run_step(tmp, name, cwd, runner, gitleaks='', shell='', **env):
     if gitleaks:  # the stub takes the binary's place where the download step left it
         (runner / 'gitleaks').write_text(gitleaks, encoding='utf-8', newline='\n')
         (runner / 'gitleaks').chmod(0o755)
-    script = Path(tmp) / f'{name}.sh'
+    script, bash_env = Path(tmp) / f'{name}.sh', Path(tmp) / f'{name}.bash'
     script.write_text(_named_run(ACTION['runs']['steps'], name), encoding='utf-8', newline='\n')
-    env = {**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp), **env}
+    # BASH_ENV makes the step's python3 this interpreter (the suite also runs on Windows).
+    bash_env.write_text(f'python3() {{ {shlex.quote(sys.executable)} "$@"; }}\n{shell}',
+                        encoding='utf-8', newline='\n')
+    env = {**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': str(bash_env), **env}
     return subprocess.run([_action_bash(), '-e', str(script)], cwd=cwd, env=env,
                           capture_output=True, text=True, timeout=120)
 
@@ -142,7 +137,8 @@ def test_secrets_scans_full_history_from_a_trusted_config(tmp):
         'fail this suite')
 
 
-@pytest.mark.parametrize('state', ['tracked', 'file', 'dir', 'link', 'dangling', 'absent', 'lost'])
+@pytest.mark.parametrize('state', [
+    'tracked', 'file', 'dir', 'link', 'dangling', 'absent', 'lost', 'refused'])
 @pytest.mark.parametrize('leak', [True, False])
 @pytest.mark.parametrize('step', [HISTORY_STEP, TREE_STEP])
 def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step, leak, state):
@@ -176,28 +172,31 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step, leak, 
     copy_dir, report = runner / 'gitleaks-trusted', runner / 'secret-scan-report'
     for directory in (copy_dir, report, record):
         directory.mkdir(parents=True)
-    # The stub records each call and reports as gitleaks does; a leaking run finds a leak
-    # in the history and in a.txt, and a lost one loses what the step set aside.
+    # The stub records each call and reports as gitleaks does; a leaking run finds a leak in
+    # history and a.txt, lost loses the aside, refused fails renaming attributes or sub's file.
     gitleaks = (
         '#!/usr/bin/env bash\n'
-        'printf "%s\\t" "$@" >> "$SECRET_SCAN_STUB_ARGV"; echo >> "$SECRET_SCAN_STUB_ARGV"\n'
-        'cat .git/info/attributes > "$SECRET_SCAN_STUB_ATTRIBUTES"\n'
+        '{ printf "%s\\t" "$@"; echo; } >> "$SECRET_SCAN_STUB_RECORD/argv"\n'
+        'cat .git/info/attributes > "$SECRET_SCAN_STUB_RECORD/attributes"\n'
         'for f in .gitleaksignore "${@: -1}/.gitleaksignore"; do if [ -e "$f" ] || [ -L "$f" ]; '
-        'then echo present; else echo absent; fi; done >> "$SECRET_SCAN_STUB_IGNORE"\n'
+        'then echo present; else echo absent; fi; done >> "$SECRET_SCAN_STUB_RECORD/ignore"\n'
         '[ "$SECRET_SCAN_STUB_STATE" != lost ] || rm -rf "$RUNNER_TEMP"/secret-scan-aside.*/*\n'
         'for a; do [ "$prev" = --report-path ] && report=$a; prev=$a; done\n'
         'case "$SECRET_SCAN_STUB_LEAK $1 ${@: -1}" in True\\ detect*) leak=history ;;'
         ' True*\\ a.txt) leak=a.txt ;; *) leak= ;; esac\n'
         'if [ -z "$leak" ]; then echo [] > "$report"; exit 0; fi\n'
         'echo "[{\\"File\\": \\"$leak\\"}]" > "$report"; exit 3\n')
-    result = _run_step(tmp, step, repo, runner, gitleaks, SECRET_SCAN_STUB_LEAK=str(leak),
-                       SECRET_SCAN_STUB_ARGV=str(record / 'argv'), SECRET_SCAN_STUB_STATE=state,
-                       SECRET_SCAN_STUB_ATTRIBUTES=str(record / 'attributes'),
-                       SECRET_SCAN_STUB_IGNORE=str(record / 'ignore'))
-    failed = 1 if state == 'lost' else leak and (3 if step == HISTORY_STEP else 1)
+    refuse = ('mv() { case "$2" in .git/info/attributes | sub/.gitleaksignore) return 1 ;; esac\n'
+              'command mv "$@"; }\n') * (state == 'refused')
+    result = _run_step(tmp, step, repo, runner, gitleaks, refuse, SECRET_SCAN_STUB_LEAK=str(leak),
+                       SECRET_SCAN_STUB_RECORD=str(record), SECRET_SCAN_STUB_STATE=state)
+    failed = 1 if state in ('lost', 'refused') else leak and (3 if step == HISTORY_STEP else 1)
     assert result.returncode == failed, (
-        'a leak anywhere fails the step, and so does a path it cannot put back', result.stderr)
-    assert state == 'lost' or tree() == before, 'each moved path is back, and no target written'
+        'a leak anywhere fails the step, as does a path it cannot move or put back', result.stderr)
+    assert state == 'lost' or tree() == before and not [*runner.glob('secret-scan-aside.*')], (
+        'each moved path is back, no target written, and nothing left aside')
+    if state == 'refused':  # the step stopped before its scans
+        return
     assert step == TREE_STEP or (record / 'attributes').read_text(encoding='utf-8') == '* diff\n', (
         'a plain diff attribute keeps a NUL-bearing blob in the scan; -diff '
         'and an unspecified attribute both hide it from git log -p')
@@ -243,6 +242,7 @@ def test_a_tree_with_nothing_to_scan_reports_no_findings(tmp):
     # A second run fails before any scan, its part-report directory taken, and puts it back.
     result = _run_step(tmp, TREE_STEP, repo, runner)
     assert result.returncode == 1 and (repo / '.gitleaksignore').read_bytes() == b'kept\n'
+    assert not [*runner.glob('secret-scan-aside.*')], 'a full put-back leaves nothing aside'
 
 
 @pytest.mark.parametrize('output, status, passes', [

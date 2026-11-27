@@ -68,6 +68,14 @@ def _git(repo, *arguments):
                           capture_output=True, text=True).stdout
 
 
+def _python3_env(tmp):
+    """A BASH_ENV making a step's python3 this interpreter: the suite also runs on Windows."""
+    bash_env = Path(tmp) / 'python3.bash'
+    bash_env.write_text(f'python3() {{ {shlex.quote(sys.executable)} "$@"; }}\n',
+                        encoding='utf-8', newline='\n')
+    return str(bash_env)
+
+
 def _step_script(tmp, name):
     script = Path(tmp) / f'{name}.sh'
     script.write_text(_named_run(ACTION['runs']['steps'], name), encoding='utf-8', newline='\n')
@@ -164,16 +172,14 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step):
         'for f in .gitleaksignore "${@: -1}/.gitleaksignore"; do if [ -e "$f" ]; then '
         'echo present; else echo absent; fi; done >> "$SECRET_SCAN_STUB_IGNORE"\n'
         'for a; do [ "$prev" = --report-path ] && report=$a; prev=$a; done\n'
-        'case "$1 ${@: -1}" in detect* | *\\ a.txt) echo "[{\\"File\\": \\"${@: -1}\\"}]" '
-        '> "$report"; exit 3 ;; esac\necho [] > "$report"\n', encoding='utf-8', newline='\n')
+        'case "$1 ${@: -1}" in detect*) leak=history ;; *\\ a.txt) leak=a.txt ;; *) leak= ;; esac\n'
+        'if [ -z "$leak" ]; then echo [] > "$report"; exit 0; fi\n'
+        'echo "[{\\"File\\": \\"$leak\\"}]" > "$report"; exit 3\n', encoding='utf-8', newline='\n')
     stub.chmod(0o755)
-    bash_env = Path(tmp) / 'python3.bash'  # the tree step's python3 is this interpreter
-    bash_env.write_text(f'python3() {{ {shlex.quote(sys.executable)} "$@"; }}\n',
-                        encoding='utf-8', newline='\n')
     result = subprocess.run(
         [_action_bash(), '-e', str(_step_script(tmp, step))],
         cwd=repo, capture_output=True, text=True, timeout=120,
-        env={**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': str(bash_env),
+        env={**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp),
              'SECRET_SCAN_STUB_ARGV': str(record / 'argv'),
              'SECRET_SCAN_STUB_ATTRIBUTES': str(record / 'attributes'),
              'SECRET_SCAN_STUB_IGNORE': str(record / 'ignore')})
@@ -198,7 +204,8 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step):
         assert argv[8:12] == [f'--log-opts={log_opts}', '--report-format', 'json',
                               '--report-path'] and Path(argv[12]) == report / 'history.json', argv
         assert len(argv) == 13, 'the walk keeps type changes and merges'
-        assert len(json.loads((report / 'history.json').read_text(encoding='utf-8'))) == 1
+        assert json.loads((report / 'history.json').read_text(encoding='utf-8')) == [
+            {'File': 'history'}]
         return
     # Every checked-out entry is scanned, after a leak too, but never git's own
     # metadata; `--` keeps a leading dash a path.
@@ -209,6 +216,21 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step):
     assert not any(repo in part.parents or part.parent == report for part in parts), (
         'a part report is neither scanned as the tree nor uploaded beside the merged one')
     assert json.loads((report / 'tree.json').read_text(encoding='utf-8')) == [{'File': 'a.txt'}]
+
+
+def test_a_tree_with_nothing_to_scan_reports_no_findings(tmp):
+    repo, runner = Path(tmp) / 'repo', Path(tmp) / 'runner-temp'
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True, capture_output=True)
+    (runner / 'secret-scan-report').mkdir(parents=True)
+    (runner / 'gitleaks').write_text('#!/usr/bin/env bash\necho "$@" >> "$RUNNER_TEMP/calls"\n',
+                                     encoding='utf-8', newline='\n')
+    (runner / 'gitleaks').chmod(0o755)
+    result = subprocess.run(
+        [_action_bash(), '-e', str(_step_script(tmp, TREE_STEP))], cwd=repo, capture_output=True,
+        text=True, timeout=120,
+        env={**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp)})
+    assert result.returncode == 0 and not (runner / 'calls').exists(), result.stderr
+    assert json.loads((runner / 'secret-scan-report/tree.json').read_text(encoding='utf-8')) == []
 
 
 @pytest.mark.parametrize('output, status, passes', [
@@ -266,11 +288,6 @@ def test_the_trusted_config_step_reads_the_trusted_event_commit(tmp):
     commit('[allowlist]\ndescription = "the head exempts itself"\n', 'head',
            ignore='the head exempts itself\n')
     script = _step_script(tmp, CONFIG_STEP)
-    # The secrets job runs on ubuntu, where python3 exists; this suite also
-    # runs on Windows, so the step's python3 is the interpreter running it.
-    bash_env = Path(tmp) / 'python3.bash'
-    bash_env.write_text(f'python3() {{ {shlex.quote(sys.executable)} "$@"; }}\n',
-                        encoding='utf-8', newline='\n')
     runs = iter(range(100))
 
     def run(before='', base='', event='push', default_branch=''):
@@ -280,7 +297,7 @@ def test_the_trusted_config_step_reads_the_trusted_event_commit(tmp):
         result = subprocess.run(
             [_action_bash(), '-e', str(script)], cwd=repo, capture_output=True,
             text=True, timeout=120, env={
-                **os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': str(bash_env),
+                **os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': _python3_env(tmp),
                 'SECRET_SCAN_ACTION_PATH': str(ROOT), 'SECRET_SCAN_EVENT_NAME': event,
                 'SECRET_SCAN_BASE_SHA': base, 'SECRET_SCAN_BEFORE_SHA': before,
                 'SECRET_SCAN_DEFAULT_BRANCH': default_branch})

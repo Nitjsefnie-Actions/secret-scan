@@ -27,18 +27,19 @@ checked-out working tree, every top-level entry but `.git`. Both scans use the
 same config and ignore list, the tree scan reports even when the history scan
 has findings, and a finding in either fails the action. Each writes a gitleaks
 JSON report, `[]` when clean and the findings when red:
-`$RUNNER_TEMP/secret-scan-report/history.json` and `tree.json`, for
-`actions/upload-artifact` with `path: ${{ runner.temp }}/secret-scan-report`.
-Secrets are redacted there, but a history finding names its commit's author,
-email and message. It then scans a Slack bot token it assembles at run time
-under that config and fails unless the scan exits 1 with a `RuleID:` finding
-line, so a config whose rules miss that token fails too. It downloads the
-binary and that release's default rules, each checked against its digest, and
-reads `.gitleaks.toml` and `.gitleaksignore` from the commit the change is
-judged against: a pull request's base, a push's previous tip, otherwise the
-default branch's tip. It refuses a config there that sets `[extend] path`.
-With no config there, or one setting `useDefault = true`, it runs the default
-rules without the allowlists that exempt a file by its path alone.
+`$RUNNER_TEMP/secret-scan-report/history.json` and `tree.json`, for an
+`actions/upload-artifact` step with `if: ${{ !cancelled() }}`, so it runs
+after a red scan, and `path: ${{ runner.temp }}/secret-scan-report`. Secrets
+are redacted there, but a history finding names its commit's author, email and
+message. It then scans a Slack bot token it assembles at run time under that
+config and fails unless the scan exits 1 with a `RuleID:` finding line, so a
+config whose rules miss that token fails too. It downloads the binary and that
+release's default rules, each checked against its digest, and reads
+`.gitleaks.toml` and `.gitleaksignore` from the commit the change is judged
+against: a pull request's base, a push's previous tip, otherwise the default
+branch's tip. It refuses a config there that sets `[extend] path`. With no
+config there, or one setting `useDefault = true`, it runs the default rules
+without the allowlists that exempt a file by its path alone.
 
 ## Inputs
 

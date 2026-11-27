@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      # Dependabot writes its own commit messages, so the scope in
+      # `ci(deps):` exists only because this line appends it.
+      include: scope
+    groups:
+      # Every action bump rides in one version-update pull request,
+      # codeql-action included: `init` and `analyze` both sit in
+      # .github/workflows/codeql.yml and must stay on one revision (`analyze`
+      # fails when its revision differs from `init`'s), so a bump that
+      # arrives as one pull request per `uses:` line can never go green.
+      # SARIF upload sits in .github/workflows/scorecard.yml, a separate
+      # workflow, and rides along without sharing that requirement.
+      github-actions:
+        patterns:
+          - "*"
+      # A group without `applies-to` covers version updates only. Security
+      # updates are enabled on this repository (verified via
+      # `gh api repos/Nitjsefnie-Actions/pr-gate/automated-security-fixes`),
+      # so without this group a security bump would arrive outside the
+      # version group — one pull request per `uses:` line, leaving `init` and
+      # `analyze` on different revisions inside .github/workflows/codeql.yml.
+      github-actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+

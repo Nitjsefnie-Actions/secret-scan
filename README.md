@@ -23,19 +23,18 @@ mutable branch or tag.
 
 `Nitjsefnie-Actions/secret-scan` runs gitleaks 8.30.1 on a Linux x64 runner
 over the whole git history, so it needs a full-history checkout, and over the
-checked-out working tree, `.git` included: a credential the checkout persisted
-in `.git/config` is a finding, hence `persist-credentials: false`. Both scans
-use the same config and ignore list, the tree scan reports even when the
-history scan has findings, and a finding in either fails the action. It then
-scans a Slack bot token it assembles at run time under that config and fails
-unless the scan exits 1 with a `RuleID:` finding line, so a config whose rules
-miss that token fails too. It downloads the binary and that release's default
-rules, each checked against its digest, and reads `.gitleaks.toml` and
-`.gitleaksignore` from the commit the change is judged against: a pull
-request's base, a push's previous tip, otherwise the default branch's tip. It
-refuses a config there that sets `[extend] path`. With no config there, or one
-setting `useDefault = true`, it runs the default rules without the allowlists
-that exempt a file by its path alone.
+checked-out working tree, every top-level entry but `.git`. Both scans use the
+same config and ignore list, the tree scan reports even when the history scan
+has findings, and a finding in either fails the action. It then scans a Slack
+bot token it assembles at run time under that config and fails unless the scan
+exits 1 with a `RuleID:` finding line, so a config whose rules miss that token
+fails too. It downloads the binary and that release's default rules, each
+checked against its digest, and reads `.gitleaks.toml` and `.gitleaksignore`
+from the commit the change is judged against: a pull request's base, a push's
+previous tip, otherwise the default branch's tip. It refuses a config there
+that sets `[extend] path`. With no config there, or one setting `useDefault =
+true`, it runs the default rules without the allowlists that exempt a file by
+its path alone.
 
 ## Inputs
 

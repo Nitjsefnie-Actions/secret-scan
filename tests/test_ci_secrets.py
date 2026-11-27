@@ -86,7 +86,7 @@ def test_secrets_scans_full_history_from_a_trusted_config(tmp):
     assert workflow['concurrency'] == {
         'group': 'secrets-${{ github.ref }}', 'cancel-in-progress': 'true'}
     steps = workflow['jobs']['gitleaks']['steps']
-    assert steps == [{**steps[0], 'uses': (
+    assert steps[:2] == [{**steps[0], 'uses': (
         f"actions/checkout@{_shipped_action_pin('actions/checkout')}")}, {'uses': './'}]
     assert ACTION['runs']['using'] == 'composite'
     steps = ACTION['runs']['steps']

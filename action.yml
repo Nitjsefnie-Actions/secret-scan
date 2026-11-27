@@ -75,8 +75,7 @@ runs:
 
     - name: Scan the working tree
       # Reported even when the history scan is red, never without the trusted config.
-      # Every top-level entry but .git, where a pre-v6 checkout persists its token;
-      # each entry's findings keep the fingerprints one scan of . would give.
+      # Not .git: actions/checkout before v6 persists its token there.
       if: ${{ !cancelled() && steps.trusted.outcome == 'success' }}
       shell: bash
       run: |

@@ -20,6 +20,8 @@ from _workflows import _action_bash, _named_run, _shipped_action_pin, _workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_STEP = "Take the scan's config and ignore list from the trusted commit"
+HISTORY_STEP, TREE_STEP = 'Scan the git history', 'Scan the working tree'
+CANARY_STEP = 'Prove the scanner flags a planted canary'
 ACTION = yaml.load((ROOT / 'action.yml').read_text(encoding='utf-8'),
                    Loader=yaml.BaseLoader)
 # Shaped like gitleaks' default config: a global path list, a path-only rule allowlist,
@@ -92,7 +94,7 @@ def test_secrets_scans_full_history_from_a_trusted_config(tmp):
     steps = ACTION['runs']['steps']
     assert [(step['name'], step['shell']) for step in steps] == [
         ('Download gitleaks and verify its digest', 'bash'), (CONFIG_STEP, 'bash'),
-        ('Scan the tree and the history', 'bash')]
+        (HISTORY_STEP, 'bash'), (TREE_STEP, 'bash'), (CANARY_STEP, 'bash')]
     # One release, binary and default rules each frozen by its digest, fetched
     # through one retrying curl; which release is the action's call.
     download = re.sub(r'\s*\\\n\s*', ' ', steps[0]['run'])
@@ -110,16 +112,22 @@ def test_secrets_scans_full_history_from_a_trusted_config(tmp):
     assert set(steps[1]['env']) == {
         'SECRET_SCAN_ACTION_PATH', 'SECRET_SCAN_EVENT_NAME', 'SECRET_SCAN_BASE_SHA',
         'SECRET_SCAN_BEFORE_SHA', 'SECRET_SCAN_DEFAULT_BRANCH'}
-    scan = steps[2]
-    assert 'if' not in scan and 'continue-on-error' not in scan
-    assert '||' not in scan['run'], 'no error-swallowing fallback may weaken the gate'
+    assert steps[1]['id'] == 'trusted'
+    assert not any('continue-on-error' in step for step in steps[2:])
+    assert not any('||' in step['run'] for step in steps[2:4]), 'no fallback may weaken a scan'
+    assert 'if' not in steps[2], 'the history scan runs only after every earlier step passed'
+    # Each still reports when the history scan is red, and never runs on the
+    # judged tree's own config: the trusted step must have succeeded.
+    assert [step['if'] for step in steps[3:]] == [
+        "${{ !cancelled() && steps.trusted.outcome == 'success' }}"] * 2
     config = tomllib.loads((ROOT / '.gitleaks.toml').read_text(encoding='utf-8'))
     assert config == {'extend': {'useDefault': True}}, (
         'the extend line IS the gate; a narrowing allowlist replacement must '
         'fail this suite')
 
 
-def test_the_scan_step_clears_the_judged_exemptions(tmp):
+@pytest.mark.parametrize('step', [HISTORY_STEP, TREE_STEP])
+def test_the_scan_steps_clear_the_judged_exemptions(tmp, step):
     repo = Path(tmp) / 'repo'
     repo.mkdir()
     subprocess.run(['git', 'init', '-q', '-b', 'main', str(repo)], check=True,
@@ -145,24 +153,57 @@ def test_the_scan_step_clears_the_judged_exemptions(tmp):
         encoding='utf-8', newline='\n')
     stub.chmod(0o755)
     result = subprocess.run(
-        [_action_bash(), '-e', str(_step_script(tmp, 'Scan the tree and the history'))],
+        [_action_bash(), '-e', str(_step_script(tmp, step))],
         cwd=repo, capture_output=True, text=True, timeout=120,
         env={**os.environ, 'RUNNER_TEMP': str(runner),
              'SECRET_SCAN_STUB_ARGV': str(record / 'argv'),
              'SECRET_SCAN_STUB_ATTRIBUTES': str(record / 'attributes'),
              'SECRET_SCAN_STUB_IGNORE': str(record / 'ignore')})
     assert result.returncode == 3, ('the scan status is the step status', result.stderr)
-    assert (record / 'attributes').read_text(encoding='utf-8') == '* diff\n', (
+    assert step == TREE_STEP or (record / 'attributes').read_text(encoding='utf-8') == '* diff\n', (
         'a plain diff attribute keeps a NUL-bearing blob in the scan; -diff '
         'and an unspecified attribute both hide it from git log -p')
     assert (record / 'ignore').read_text(encoding='utf-8').strip() == 'absent', (
         'the judged tree no longer exempts itself through .gitleaksignore')
     argv = (record / 'argv').read_text(encoding='utf-8').splitlines()
-    assert argv[:4] == ['detect', '--verbose', '--redact', '--ignore-gitleaks-allow'], argv
+    command = 'detect' if step == HISTORY_STEP else 'dir'
+    assert argv[:4] == [command, '--verbose', '--redact', '--ignore-gitleaks-allow'], argv
     assert argv[4] == '--config' and Path(argv[5]) == copy_dir / '.gitleaks.toml', argv
     assert argv[6] == '--gitleaks-ignore-path' and Path(argv[7]) == copy_dir, argv
     log_opts = '--full-history --all --diff-filter=uxdb --diff-merges=first-parent'
-    assert argv[8:] == [f'--log-opts={log_opts}'], 'the walk keeps type changes and merges'
+    assert argv[8:] == ([f'--log-opts={log_opts}'] if step == HISTORY_STEP else ['.']), (
+        'the history walk keeps type changes and merges; the tree scan reads the checkout')
+
+
+@pytest.mark.parametrize('output, status, passes', [
+    ('RuleID:      slack-bot-token\n', 1, True), ('FTL unable to load gitleaks config\n', 1, False),
+    ('Finding: RuleID: x\n', 1, False), ('RuleID: x\n', 2, False), ('', 0, False)])
+def test_the_canary_step_passes_only_on_a_reported_finding(tmp, output, status, passes):
+    runner = Path(tmp) / 'runner-temp'
+    runner.mkdir()
+    stub = runner / 'gitleaks'
+    stub.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > argv\n'
+                    'cat "${@: -1}/canary.env" > canary\nprintf "$SECRET_SCAN_STUB_OUT"\n'
+                    'exit "$SECRET_SCAN_STUB_STATUS"\n', encoding='utf-8', newline='\n')
+    stub.chmod(0o755)
+    result = subprocess.run(
+        [_action_bash(), '-e', str(_step_script(tmp, CANARY_STEP))], cwd=tmp,
+        capture_output=True, text=True, timeout=120, env={
+            **os.environ, 'RUNNER_TEMP': str(runner), 'SECRET_SCAN_STUB_OUT': output,
+            'SECRET_SCAN_STUB_STATUS': str(status)})
+    assert (result.returncode == 0) == passes, (result.stdout, result.stderr)
+    assert output in result.stdout, 'the scan output is printed whatever the verdict'
+    assert passes or f'(exit {status})' in result.stderr
+    trusted = runner / 'gitleaks-trusted'
+    argv = (Path(tmp) / 'argv').read_text(encoding='utf-8').splitlines()
+    assert argv[:5] == ['dir', '--verbose', '--redact', '--ignore-gitleaks-allow', '--config']
+    assert Path(argv[5]) == trusted / '.gitleaks.toml' and argv[6] == '--gitleaks-ignore-path'
+    assert Path(argv[7]) == trusted and Path(argv[8]) == runner / 'gitleaks-canary', argv
+    canary = (Path(tmp) / 'canary').read_text(encoding='utf-8')
+    # gitleaks 8.30.1's slack-bot-token rule, which the default rules carry.
+    assert re.fullmatch(r'xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*\n', canary), canary
+    assert canary.strip() not in (ROOT / 'action.yml').read_text(encoding='utf-8'), (
+        'a contiguous token in the action would be flagged by its own scan')
 
 
 def test_the_trusted_config_step_reads_the_trusted_event_commit(tmp):

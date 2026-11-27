@@ -1,5 +1,5 @@
 name: Secret scan
-description: Scan the whole tree and git history with gitleaks under a config the judged change cannot edit.
+description: Scan the working tree and git history with gitleaks under a config the judged change cannot edit.
 author: Nitjsefnie
 runs:
   using: composite
@@ -25,6 +25,7 @@ runs:
         echo 'e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf  gitleaks-default.toml' | sha256sum -c -
 
     - name: Take the scan's config and ignore list from the trusted commit
+      id: trusted
       # Read from the judged tree, they would let a change exempt its own finding.
       shell: bash
       env:
@@ -60,7 +61,7 @@ runs:
           "$RUNNER_TEMP/gitleaks-default.toml" "$RUNNER_TEMP/gitleaks-default-stripped.toml" \
           "$dir/.gitleaks.toml"
 
-    - name: Scan the tree and the history
+    - name: Scan the git history
       # Bare: this step's exit status IS the gate. --redact masks what --verbose names.
       shell: bash
       run: |
@@ -71,3 +72,32 @@ runs:
           --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
           --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" \
           --log-opts='--full-history --all --diff-filter=uxdb --diff-merges=first-parent'
+
+    - name: Scan the working tree
+      # Reported even when the history scan is red, never without the trusted config.
+      if: ${{ !cancelled() && steps.trusted.outcome == 'success' }}
+      shell: bash
+      run: |
+        rm -rf .gitleaksignore
+        "$RUNNER_TEMP/gitleaks" dir --verbose --redact --ignore-gitleaks-allow \
+          --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
+          --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" .
+
+    - name: Prove the scanner flags a planted canary
+      # A clean scan proves nothing when the rules match nothing. The token is
+      # assembled here so no file holds it; a fatal error exits 1 too, hence RuleID.
+      if: ${{ !cancelled() && steps.trusted.outcome == 'success' }}
+      shell: bash
+      run: |
+        canary="$RUNNER_TEMP/gitleaks-canary"
+        mkdir "$canary"
+        printf 'xox%s-%s-%s-%s\n' b 248965712390 163184295512 SxqzwmAbCdEfGhIjKlMnOpQr \
+          > "$canary/canary.env"
+        if out="$("$RUNNER_TEMP/gitleaks" dir --verbose --redact --ignore-gitleaks-allow \
+          --config "$RUNNER_TEMP/gitleaks-trusted/.gitleaks.toml" \
+          --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-trusted" "$canary" 2>&1)"; then rc=0; else rc=$?; fi
+        printf '%s\n' "$out"
+        if [ "$rc" -ne 1 ] || ! grep -q '^RuleID:' <<< "$out"; then
+          echo "the scan flagged no planted canary (exit $rc): the rules detect nothing" >&2
+          exit 1
+        fi

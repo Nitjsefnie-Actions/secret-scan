@@ -9,7 +9,8 @@
         7.24
       ],
       "tests/test_ratchet_push.py": [
-        46.62
+        46.62,
+        60.87
       ],
       "tests/test_release_dispatch.py": [
         0.9
@@ -20,16 +21,20 @@
     },
     "macos-latest / Python 3.15": {
       "tests/test_ci_secrets.py": [
-        4.33
+        4.33,
+        2.5
       ],
       "tests/test_conftest.py": [
-        12.51
+        12.51,
+        5.91
       ],
       "tests/test_ratchet_push.py": [
-        70.08
+        70.08,
+        48.23
       ],
       "tests/test_release_dispatch.py": [
-        1.97
+        1.97,
+        0.78
       ],
       "tests/test_type_ratchet.py": [
         0.44
@@ -57,7 +62,8 @@
         1.54
       ],
       "tests/test_conftest.py": [
-        7.15
+        7.15,
+        5.35
       ],
       "tests/test_ratchet_push.py": [
         53.13
@@ -71,13 +77,15 @@
     },
     "windows-latest / Python 3.14": {
       "tests/test_ci_secrets.py": [
-        6.81
+        6.81,
+        8.61
       ],
       "tests/test_conftest.py": [
         13.12
       ],
       "tests/test_ratchet_push.py": [
-        112.0
+        112.0,
+        80.22
       ],
       "tests/test_release_dispatch.py": [
         1.82
@@ -88,10 +96,12 @@
     },
     "windows-latest / Python 3.15": {
       "tests/test_ci_secrets.py": [
-        6.68
+        6.68,
+        4.44
       ],
       "tests/test_conftest.py": [
-        13.0
+        13.0,
+        8.21
       ],
       "tests/test_ratchet_push.py": [
         88.46

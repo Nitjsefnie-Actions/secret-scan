@@ -6,6 +6,7 @@ real repository, not only read; scripts/ci/secret_scan_config.py is driven
 in-process.
 """
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -127,38 +128,52 @@ def test_secrets_scans_full_history_from_a_trusted_config(tmp):
 
 
 @pytest.mark.parametrize('step', [HISTORY_STEP, TREE_STEP])
-def test_the_scan_steps_clear_the_judged_exemptions(tmp, step):
-    repo = Path(tmp) / 'repo'
+def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step):
+    repo, outside = Path(tmp) / 'repo', Path(tmp) / 'outside'
     repo.mkdir()
     subprocess.run(['git', 'init', '-q', '-b', 'main', str(repo)], check=True,
                    capture_output=True)
     attributes = repo / '.git/info/attributes'
     attributes.parent.mkdir(parents=True, exist_ok=True)
     attributes.write_text('some/file.txt -diff\n', encoding='utf-8')
-    (repo / '.gitleaksignore').write_text('judged exemption\n', encoding='utf-8')
+    entries = ('-dash.txt', '.hidden', 'a.txt', 'sub', 'z.txt')
+    for name in (*entries[:3], 'sub/x', entries[4]):
+        (repo / name).parent.mkdir(exist_ok=True)
+        (repo / name).write_text('x\n', encoding='utf-8')
+    for judged in (repo, repo / 'sub', outside):
+        judged.mkdir(exist_ok=True)
+        (judged / '.gitleaksignore').write_text('judged exemption\n', encoding='utf-8')
+    try:  # a symlinked entry is skipped, so its target's files stay where they are
+        (repo / 'link').symlink_to(outside, target_is_directory=True)
+    except OSError:  # Windows without symlink rights: nothing to skip
+        pass
     runner = Path(tmp) / 'runner-temp'
-    copy_dir = runner / 'gitleaks-trusted'
+    copy_dir, report = runner / 'gitleaks-trusted', runner / 'secret-scan-report'
     copy_dir.mkdir(parents=True)
+    report.mkdir()
     record = Path(tmp) / 'record'
     record.mkdir()
-    for name in ('-dash.txt', '.hidden', 'a.txt', 'z.txt'):
-        (repo / name).write_text('x\n', encoding='utf-8')
     # The stub takes the binary's place where the download step left it and
-    # records each call; it finds a leak in the history and in a.txt alone.
+    # records each call; it finds a leak in the history and in a.txt alone,
+    # and writes its report as gitleaks does, [] when clean.
     stub = runner / 'gitleaks'
     stub.write_text(
         '#!/usr/bin/env bash\n'
         'printf "%s\\t" "$@" >> "$SECRET_SCAN_STUB_ARGV"; echo >> "$SECRET_SCAN_STUB_ARGV"\n'
         'cat .git/info/attributes > "$SECRET_SCAN_STUB_ATTRIBUTES"\n'
-        'if [ -e .gitleaksignore ]; then echo present >> "$SECRET_SCAN_STUB_IGNORE"; '
-        'else echo absent >> "$SECRET_SCAN_STUB_IGNORE"; fi\n'
-        'case "${@: -1}" in a.txt | --log-opts=*) exit 3 ;; esac\n',
-        encoding='utf-8', newline='\n')
+        'for f in .gitleaksignore "${@: -1}/.gitleaksignore"; do if [ -e "$f" ]; then '
+        'echo present; else echo absent; fi; done >> "$SECRET_SCAN_STUB_IGNORE"\n'
+        'for a; do [ "$prev" = --report-path ] && report=$a; prev=$a; done\n'
+        'case "$1 ${@: -1}" in detect* | *\\ a.txt) echo "[{\\"File\\": \\"${@: -1}\\"}]" '
+        '> "$report"; exit 3 ;; esac\necho [] > "$report"\n', encoding='utf-8', newline='\n')
     stub.chmod(0o755)
+    bash_env = Path(tmp) / 'python3.bash'  # the tree step's python3 is this interpreter
+    bash_env.write_text(f'python3() {{ {shlex.quote(sys.executable)} "$@"; }}\n',
+                        encoding='utf-8', newline='\n')
     result = subprocess.run(
         [_action_bash(), '-e', str(_step_script(tmp, step))],
         cwd=repo, capture_output=True, text=True, timeout=120,
-        env={**os.environ, 'RUNNER_TEMP': str(runner),
+        env={**os.environ, 'RUNNER_TEMP': str(runner), 'BASH_ENV': str(bash_env),
              'SECRET_SCAN_STUB_ARGV': str(record / 'argv'),
              'SECRET_SCAN_STUB_ATTRIBUTES': str(record / 'attributes'),
              'SECRET_SCAN_STUB_IGNORE': str(record / 'ignore')})
@@ -169,19 +184,31 @@ def test_the_scan_steps_clear_the_judged_exemptions(tmp, step):
         'and an unspecified attribute both hide it from git log -p')
     calls = [line.split('\t')[:-1]
              for line in (record / 'argv').read_text(encoding='utf-8').splitlines()]
-    assert (record / 'ignore').read_text(encoding='utf-8').split() == ['absent'] * len(calls), (
-        'the judged tree no longer exempts itself through .gitleaksignore')
+    assert (record / 'ignore').read_text(encoding='utf-8').split() == ['absent'] * 2 * len(calls), (
+        'no judged .gitleaksignore is left where gitleaks reads one')
+    assert (outside / '.gitleaksignore').exists(), 'a linked directory is not the checkout'
     command = 'detect' if step == HISTORY_STEP else 'dir'
     for argv in calls:
         assert argv[:4] == [command, '--verbose', '--redact', '--ignore-gitleaks-allow'], argv
         assert argv[4] == '--config' and Path(argv[5]) == copy_dir / '.gitleaks.toml', argv
         assert argv[6] == '--gitleaks-ignore-path' and Path(argv[7]) == copy_dir, argv
     log_opts = '--full-history --all --diff-filter=uxdb --diff-merges=first-parent'
-    # The tree scan reads every checked-out entry, after a leak too, but never
-    # git's own metadata; `--` keeps a leading dash a path.
-    assert ([argv[8:] for argv in calls] == [[f'--log-opts={log_opts}']] if step == HISTORY_STEP
-            else sorted(argv[8:] for argv in calls) == [
-                ['--', name] for name in sorted(('-dash.txt', '.hidden', 'a.txt', 'z.txt'))]), calls
+    if step == HISTORY_STEP:
+        argv, = calls
+        assert argv[8:12] == [f'--log-opts={log_opts}', '--report-format', 'json',
+                              '--report-path'] and Path(argv[12]) == report / 'history.json', argv
+        assert len(argv) == 13, 'the walk keeps type changes and merges'
+        assert len(json.loads((report / 'history.json').read_text(encoding='utf-8'))) == 1
+        return
+    # Every checked-out entry is scanned, after a leak too, but never git's own
+    # metadata; `--` keeps a leading dash a path.
+    assert sorted(argv[12:] for argv in calls) == [['--', name] for name in sorted(entries)], calls
+    assert all(argv[8:11] == ['--report-format', 'json', '--report-path'] for argv in calls)
+    parts = {Path(argv[11]) for argv in calls}
+    assert len(parts) == len(calls), 'no entry overwrites another report'
+    assert not any(repo in part.parents or part.parent == report for part in parts), (
+        'a part report is neither scanned as the tree nor uploaded beside the merged one')
+    assert json.loads((report / 'tree.json').read_text(encoding='utf-8')) == [{'File': 'a.txt'}]
 
 
 @pytest.mark.parametrize('output, status, passes', [
@@ -208,6 +235,7 @@ def test_the_canary_step_passes_only_on_a_reported_finding(tmp, output, status, 
     assert argv[:5] == ['dir', '--verbose', '--redact', '--ignore-gitleaks-allow', '--config']
     assert Path(argv[5]) == trusted / '.gitleaks.toml' and argv[6] == '--gitleaks-ignore-path'
     assert Path(argv[7]) == trusted and Path(argv[8]) == runner / 'gitleaks-canary', argv
+    assert len(argv) == 9, 'the canary writes no report over the real scans\' reports'
     canary = (Path(tmp) / 'canary').read_text(encoding='utf-8')
     # gitleaks 8.30.1's slack-bot-token rule, which the default rules carry.
     assert re.fullmatch(r'xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*\n', canary), canary
@@ -260,6 +288,7 @@ def test_the_trusted_config_step_reads_the_trusted_event_commit(tmp):
         stripped = runner / 'gitleaks-default-stripped.toml'
         if result.returncode == 0:
             assert tomllib.loads(stripped.read_text(encoding='utf-8')) == STRIPPED
+            assert not any((runner / 'secret-scan-report').iterdir()), 'the report dir starts empty'
         return (result, (copy_dir / '.gitleaks.toml').read_text(encoding='utf-8'),
                 (copy_dir / '.gitleaksignore').read_text(encoding='utf-8'), str(stripped))
 

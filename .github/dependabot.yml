@@ -37,7 +37,6 @@ updates:
 
   - package-ecosystem: pip
     directory: /
-    versioning-strategy: increase-if-necessary
     schedule:
       interval: weekly
       day: wednesday

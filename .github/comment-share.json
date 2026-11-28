@@ -8,12 +8,12 @@
     6614
   ],
   ".github/workflows/audit.yml": [
-    2996,
-    4881
+    2754,
+    4660
   ],
   ".github/workflows/codeql.yml": [
-    1870,
-    2783
+    1858,
+    2771
   ],
   ".github/workflows/lint.yml": [
     1464,
@@ -32,12 +32,12 @@
     1928
   ],
   ".github/workflows/tests.yml": [
-    475,
-    2522
+    451,
+    2556
   ],
   ".github/workflows/types.yml": [
-    1307,
-    2871
+    1247,
+    2911
   ],
   "scripts/ci/type_ratchet.py": [
     1279,

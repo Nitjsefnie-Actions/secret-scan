@@ -47,7 +47,8 @@
     "ubuntu-latest / Python 3.14": {
       "tests/test_ci_secrets.py": [
         1.38,
-        5.62
+        5.62,
+        7.32
       ],
       "tests/test_conftest.py": [
         6.08
@@ -87,7 +88,8 @@
       "tests/test_ci_secrets.py": [
         6.81,
         8.61,
-        26.1
+        26.1,
+        39.73
       ],
       "tests/test_conftest.py": [
         13.12

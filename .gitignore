@@ -55,6 +55,8 @@ scripts/ci/*
 !tests/
 tests/*
 !tests/_util.py
+!tests/gate_readme_pin.py
+!tests/test_readme_pin.py
 !tests/_workflows.py
 !tests/conftest.py
 !tests/test_conftest.py

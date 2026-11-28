@@ -96,8 +96,8 @@ def test_secrets_scans_full_history_from_a_trusted_config(tmp):
     assert events['schedule'] == [{'cron': '26 5 * * *'}], (
         "exactly one daily cron, off the hour, clear of codeql Wed '47 3 * * 3' "
         "and scorecard Sat '23 2 * * 6'")
-    assert workflow['concurrency'] == {
-        'group': 'secrets-${{ github.ref }}', 'cancel-in-progress': 'true'}
+    group = "secrets-${{ github.event_name == 'push' && github.sha || github.ref }}"
+    assert workflow['concurrency'] == {'group': group, 'cancel-in-progress': 'true'}
     steps = workflow['jobs']['gitleaks']['steps']
     assert steps[:2] == [{**steps[0], 'uses': (
         f"actions/checkout@{_shipped_action_pin('actions/checkout')}")}, {'uses': './'}]

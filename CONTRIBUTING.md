@@ -22,6 +22,10 @@ are development tools only; runtime modules must stay standard-library-only.
 
 ## Required checks
 
+The `require-ci-aggregate` ruleset requires each CI context by name, as
+claim's and pr-gate's do, so `tests.yml` has no aggregate job; no shell file
+is tracked, so there is no shellcheck job.
+
 Run these from the repository root with the virtual environment active:
 
 ```bash

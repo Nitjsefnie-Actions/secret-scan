@@ -195,7 +195,7 @@ def test_the_scan_steps_clear_the_judged_exemptions_and_report(tmp, step, leak, 
         'a leak anywhere fails the step, as does a path it cannot move or put back', result.stderr)
     assert state == 'lost' or tree() == before and not [*runner.glob('secret-scan-aside.*')], (
         'each moved path is back, no target written, and nothing left aside')
-    if state == 'refused':  # the step stopped before its scans
+    if state == 'refused':  # the step stopped at the refused rename, before its full scan
         return
     assert step == TREE_STEP or (record / 'attributes').read_text(encoding='utf-8') == '* diff\n', (
         'a plain diff attribute keeps a NUL-bearing blob in the scan; -diff '

@@ -8,7 +8,8 @@
       ],
       "tests/test_conftest.py": [
         7.24,
-        4.99
+        4.99,
+        3.08
       ],
       "tests/test_ratchet_push.py": [
         46.62,
@@ -86,7 +87,8 @@
         9.37
       ],
       "tests/test_ratchet_push.py": [
-        53.13
+        53.13,
+        35.53
       ],
       "tests/test_readme_pin.py": [
         0.01

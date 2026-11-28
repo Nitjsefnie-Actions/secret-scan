@@ -16,7 +16,7 @@ mutable branch or tag.
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/secret-scan@<sha> # v1.0.0
+      - uses: Nitjsefnie-Actions/secret-scan@f6b0956e1bfea8aec4a4524032c3e7bbbc35b28b # v1.1.0
 ```
 
 ## What it checks

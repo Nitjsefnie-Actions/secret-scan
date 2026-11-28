@@ -100,6 +100,14 @@ jobs:
             exit 1
           fi
 
+      - name: Check the README install pin is the newest release or the one before
+        # Dependabot bumps the workflows' `uses:` pins and never markdown. A
+        # release tags main's tip after the commit carrying the README merged,
+        # so the previous release still counts as current.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tests/gate_readme_pin.py
+
       - name: Install actionlint
         # Downloaded and checksum-verified rather than piped from the
         # install script: `curl | bash` would make this job trust whatever

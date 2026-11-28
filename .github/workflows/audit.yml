@@ -2,7 +2,7 @@ name: audit
 
 # Dependency vulnerability gate: pip-audit resolves each requirements file to
 # its full transitive tree and checks every resolved version against the PyPI
-# advisory database and OSV.
+# advisory database.
 #
 # WHY THE CRON IS THE IMPORTANT TRIGGER. Every other gate in this repo answers
 # "did this commit break something", so push and pull_request are the natural
@@ -20,8 +20,7 @@ name: audit
 #
 # There is deliberately NO `python -m pip install --upgrade pip` here. The
 # unreviewed pip upgrade is an unaudited component — the very thing this gate
-# judges — and actionlint.yml carries the same stance for the same reason; the
-# runner's stock pip installs the pinned manifest.
+# judges; the runner's stock pip installs the pinned manifest.
 
 on:
   push:

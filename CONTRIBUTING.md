@@ -43,26 +43,26 @@ git diff --check
 pytest runs every `tests/test_*.py` module; `tests/conftest.py` gives each test
 its private `tmp` directory and fails the run on a module that collects no test
 or on any skipped test. Individual suites run the same way, for example
-`python -m pytest tests/test_action.py`.
+`python -m pytest tests/test_ci_secrets.py`.
 CI runs the same tests and Python lint on Linux, Windows, and macOS across both
 supported Python versions. The separate workflow audit pins actionlint
-1.7.12 and zizmor — zizmor's version lives in `requirements-zizmor.txt`,
-hash-verified at install time and updated by Dependabot; its installation
-steps checksum-verify actionlint.
+(version and checksum in `actionlint.yml`) and zizmor — zizmor's version
+lives in `requirements-zizmor.txt`, hash-verified at install time and updated
+by Dependabot; its installation steps checksum-verify actionlint.
 Zizmor can run offline locally; disclose that limitation when reporting results.
 
 The Python lint and type gates run the tools pinned in
 `requirements-lint.txt`, and the suites run on `requirements-test.txt`; both
 are installed with `--require-hashes --only-binary=:all:`, as the workflows
 do, and Dependabot proposes the version bumps. pycodestyle's line ceiling is the
-tree's measured convention — `setup.cfg` sets 100 columns — and admits E402
-for the deliberate `sys.path`-before-import harness pattern. pylint's checked
-in policy (`.pylintrc`) turns the style categories off; every per-message
-disable in it names the real finding that forced it. The type gate is the
-ratchet: pyright's error count is compared against `pyright-baseline.json`
-and fails only when it rises. Fix the error instead of editing the baseline;
-lower the baseline in the same commit as the fix it records. Never raise the
-recorded number to admit a new error.
+tree's longest line — `setup.cfg` sets 100 columns — and its ignore list spells
+out pycodestyle's defaults beside E402, which no tracked file triggers today.
+pylint's checked in policy (`.pylintrc`) turns the style categories off; every
+per-message disable in it names the real finding that forced it. The type gate
+is the ratchet: pyright's error count is compared against
+`pyright-baseline.json` and fails only when it rises. Fix the error instead
+of editing the baseline; lower the baseline in the same commit as the fix it
+records. Never raise the recorded number to admit a new error.
 
 Use strict test-driven development: add a behavioral regression, run it RED for
 the intended reason, implement the smallest fix, and run it GREEN. For scan

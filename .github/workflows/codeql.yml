@@ -61,8 +61,7 @@ jobs:
       # One entry per language CodeQL analyses here: `python` for the
       # scripts/ modules, `actions` for the workflow files. matrix.language
       # feeds the job name, the init step's `languages:`, and the analyze
-      # step's `category:`, so each entry lands as its own check;
-      # tests/test_workflows.py pins the whole shape.
+      # step's `category:`, so each entry lands as its own check.
       fail-fast: false
       matrix:
         include:
@@ -81,9 +80,10 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # security-extended over the default pack: the scripts/ modules
-          # parse the untrusted PR text and act on it with the consumer's
-          # token, so the deeper queries belong in every matrix entry.
+          # security-extended over the default pack: secret_scan_config.py
+          # parses a consumer's .gitleaks.toml and release_dispatch.py
+          # publishes tags with a write token, so the deeper queries belong
+          # in every matrix entry.
           queries: security-extended
       - name: Analyze
         uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5

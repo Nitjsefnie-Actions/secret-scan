@@ -1,7 +1,7 @@
 name: tests
 
 # Paths, subprocesses and Unicode cross OS boundaries, so every supported
-# Python version runs the same real parser/controller/action suites on each OS.
+# Python version runs the same real suites on each OS.
 on:
   push:
     # Default branch only: a pull-request head already gets one run from

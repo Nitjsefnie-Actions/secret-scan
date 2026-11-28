@@ -8,8 +8,8 @@
 # The list below turns off the style categories (C = convention,
 # R = refactor, I = information) wholesale, then names exactly two
 # error/warning messages to admit anyway, because a real finding forced
-# each one: the first tree-wide run (pylint 4.1.1, 2026-10-02) reported
-# nothing else. The E/W categories are never named in an `enable=`
+# each one: a tree-wide run with both enabled (pylint 4.1.4, 2026-11-28)
+# reports nothing else. The E/W categories are never named in an `enable=`
 # afterwards — a later category-level enable re-enables every specific
 # message listed before it — so what stays off stays off. Inheriting a
 # longer list from another project would read as an audit trail while

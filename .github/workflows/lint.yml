@@ -55,11 +55,15 @@ jobs:
 
       - name: Install lint toolchain
         id: install_lint
-        run: python -m pip install --require-hashes -r requirements-lint.txt
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --retries 8 --timeout 60 -r requirements-lint.txt
 
       - name: Install test dependencies
         # PyYAML, so pylint resolves `import yaml` in tests/.
-        run: python -m pip install -r requirements-test.txt
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --retries 8 --timeout 60 -r requirements-test.txt
 
       - name: pycodestyle
         # `git ls-files` so the gates measure exactly the tracked Python.

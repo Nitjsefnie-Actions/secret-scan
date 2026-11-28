@@ -65,26 +65,25 @@ jobs:
       - name: Install pip-audit
         # From the manifest, not an inline pin: Dependabot's pip ecosystem
         # reads manifest files, never a `run:` block, so the inline pin could
-        # only go stale unnoticed. pip's own --retries covers 5xx transport
-        # failures, the narrower policy beside claim's retry.sh; no
-        # --only-binary, since an unpinned tree may need an sdist.
-        run: python -m pip install --retries 8 --timeout 60 -r requirements-pip-audit.txt
+        # only go stale unnoticed. Unhashed for the reason
+        # requirements-pip-audit.txt gives; wheel-only, so no source build
+        # runs; pip's own --retries covers 5xx transport failures, the
+        # narrower policy beside claim's retry.sh.
+        run: >-
+          python -m pip install --only-binary=:all: --retries 8 --timeout 60
+          -r requirements-pip-audit.txt
 
       - name: Audit dependencies
         # The glob is evaluated at run time on purpose: a requirements*.txt
         # manifest added at the repository root joins this audit without
         # editing this workflow. Each manifest gets its OWN pip-audit
-        # invocation, because this repository's manifests are never installed
-        # together — each is consumed by its own workflow (tests.yml installs
-        # requirements-test.txt, actionlint.yml installs
-        # requirements-zizmor.txt with --require-hashes, and the install step
-        # above installs requirements-pip-audit.txt) — so each manifest is
-        # audited the way its own install consumes it. The siblings' one
-        # joint invocation is unshippable here: pip-audit resolves ALL
-        # --requirement files in one internal pip dry-run, and a hash-pinned
-        # manifest beside an un-hashed one flips that resolution into
-        # --require-hashes mode, which fails on the hashes the other manifest
-        # does not carry.
+        # invocation, because each is consumed by its own install, so each is
+        # audited the way that install consumes it. The siblings' one joint
+        # invocation is unshippable here: pip-audit resolves ALL --requirement
+        # files in one internal pip dry-run, and the un-hashed
+        # requirements-pip-audit.txt beside a hash-pinned manifest flips that
+        # resolution into --require-hashes mode, which fails on the hashes
+        # that manifest does not carry.
         #
         # No --ignore-vuln entries at present.
         #

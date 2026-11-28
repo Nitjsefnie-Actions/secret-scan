@@ -11,10 +11,8 @@ Use Python 3.14 or 3.15. Bash is required for action-step tests.
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements-test.txt
-# --require-hashes flips pip into hash-checking mode for the whole
-# invocation, so the unhashed test manifest installs separately.
-python -m pip install --require-hashes -r requirements-lint.txt
+python -m pip install --require-hashes --only-binary=:all: -r requirements-test.txt
+python -m pip install --require-hashes --only-binary=:all: -r requirements-lint.txt
 ```
 
 On Windows, create the environment with `python -m venv .venv` and activate
@@ -50,8 +48,9 @@ steps checksum-verify actionlint.
 Zizmor can run offline locally; disclose that limitation when reporting results.
 
 The Python lint and type gates run the tools pinned in
-`requirements-lint.txt` (installed with `--require-hashes`, as the workflows
-do; Dependabot proposes the version bumps). pycodestyle's line ceiling is the
+`requirements-lint.txt`, and the suites run on `requirements-test.txt`; both
+are installed with `--require-hashes --only-binary=:all:`, as the workflows
+do, and Dependabot proposes the version bumps. pycodestyle's line ceiling is the
 tree's measured convention — `setup.cfg` sets 100 columns — and admits E402
 for the deliberate `sys.path`-before-import harness pattern. pylint's checked
 in policy (`.pylintrc`) turns the style categories off; every per-message
